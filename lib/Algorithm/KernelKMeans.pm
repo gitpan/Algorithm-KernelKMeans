@@ -1,11 +1,10 @@
 package Algorithm::KernelKMeans;
 
-use 5.010;
 use strict;
 use warnings;
 use UNIVERSAL::require;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 BEGIN {
   for my $impl (qw/XS PP/) {
@@ -30,9 +29,14 @@ Algorithm::KernelKMeans - Weighted kernel k-means clusterer
 
   use Algorithm::KernelKMeans;
   use Algorithm::KernelKMeans::Util qw/generate_polynominal_kernel/;
+  use List::MoreUtils qw/zip/;
   use Try::Tiny;
   
-  my @vertices = map { [ split /\s/ ] } (<>);
+  my @vertices = map {
+    my @values = split /\s/;
+    my @keys = 0 .. $#values;
+    +{ zip @keys, @values };
+  } (<>);
   my $kernel = generate_polynominal_kernel(1, 2); # K(x1, x2) = (1 + x1x2)^2
   my $wkkm = Algorithm::KernelKMeans->new( # default weights are 1
     vertices => \@vertices,
@@ -62,10 +66,10 @@ This class is just a placeholder. Implementation code is in other class and this
 
 Currently there are 2 implementations: L<Algorithm::KernelKMeans::PP> and L<Algorithm::KernelKMeans::XS>.
 
-C<$Algorithm::KernelKMeans::IMPLEMENTATION> indicates which imlementation is loaded.
+C<$Algorithm::KernelKMeans::IMPLEMENTATION> indicates which implementation is loaded.
 
-Both of these implements same interface (documented below) and C<Algorithm::KernelKMeans> uses faster (XS) imlementation if it's available.
-So it's not neccessary usually to use these classes directly tough, you can do it if you want.
+Both of these implements same interface (documented below) and C<Algorithm::KernelKMeans> uses faster (XS) implementation if it's available.
+So it's not necessary usually to use the classes directly tough, you can do it if you want.
 
 =head1 METHODS
 
@@ -76,7 +80,7 @@ Constructor. you can specify options below:
 =head3 vertices
 
 Required. Array ref of vectors.
-Each vector is represented as an array ref of positive real numbers.
+Each vector is represented as an hash ref of positive real numbers.
 
 e.g.:
 
@@ -102,7 +106,7 @@ A matrix whose element at (i, j) is K(xi, xj) where i >= j.
 This is derived automatically from C<kernel> by default, however you can specify it manually if you already have it.
 
 Note that the clusterer only uses lower triangle part of the matrix.
-So it is not neccessary for the matrix to have element at (i, j) where i < j (This argument should be called "kernel triangle" rather than "matrix" probably).
+So it is not necessary for the matrix to have element at (i, j) where i < j (This argument should be called "kernel triangle" rather than "matrix" probably).
 
 Note that C<kernel> and C<kernel_matrix> is exclusive. When you specify C<kernel_matrix>, C<kernel> function is never used.
 

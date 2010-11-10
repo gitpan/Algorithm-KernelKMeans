@@ -23,6 +23,7 @@ README
 t/00_compile.t
 t/01_impl_detection.t
 t/02_pp_impl.t
+t/03_util.t
 t/Algorithm/NaiveKMeans.pm
 t/kernels.txt
 t/vectors.txt

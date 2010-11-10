@@ -8,7 +8,7 @@ use List::Util qw/shuffle sum/;
 use List::MoreUtils qw/natatime pairwise/;
 use Moose;
 use MooseX::Types::Common::Numeric qw/PositiveNum/;
-use MooseX::Types::Moose qw/ArrayRef CodeRef/;
+use MooseX::Types::Moose qw/ArrayRef HashRef CodeRef/;
 use POSIX qw/floor/;
 
 use Algorithm::KernelKMeans::Util qw/generate_polynominal_kernel/;
@@ -18,7 +18,7 @@ our $VERSION = '0.02';
 
 has 'vertices' => (
   is => 'ro',
-  isa => ArrayRef[ ArrayRef[PositiveNum] ],
+  isa => ArrayRef[ HashRef[PositiveNum] ],
   required => 1,
   traits => [qw/Array/],
   handles => +{

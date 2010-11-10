@@ -3,6 +3,7 @@ use warnings;
 
 use ExtUtils::testlib;
 use FindBin;
+use List::MoreUtils qw/zip/;
 use Test::More;
 use Test::Exception;
 
@@ -14,11 +15,14 @@ use Algorithm::NaiveKMeans;
 
 diag 'This test may take some minutes';
 
-# cuts data out to save time
 open my $vectors , '<', "$FindBin::Bin/vectors.txt" or die $!;
-my @vertices = map { [ split /\s+/ ] } (<$vectors>)[0 .. 255];
+my @vertices = map {
+  my @vals = split /\s+/;
+  my @keys = 0 .. $#vals;
+  +{ zip @keys, @vals };
+} <$vectors>;
 open my $kmat, '<', "$FindBin::Bin/kernels.txt" or die $!;
-my @kernel_matrix = map { [ split /\s+/ ] } (<$kmat>)[0 .. 255];
+my @kernel_matrix = map { [ split /\s+/ ] } <$kmat>;
 
 dies_ok {
   Algorithm::KernelKMeans::PP->new;
@@ -34,6 +38,10 @@ lives_ok {
     weights => [0 .. $#vertices]
   );
 } '"vertices" and "weights" must be same size';
+
+dies_ok {
+  Algorithm::KernelKMeans::XS->new(vertices => []);
+} '"vertices" must not be empty';
 
 dies_ok {
   Algorithm::KernelKMeans::PP->new(
@@ -61,11 +69,11 @@ dies_ok {
     vertices => \@vertices,
     kernel_matrix => [ @kernel_matrix[0 .. 31] ]
   );
-} 'Kernel matrix must be a lower triangle bigger than NxN (N is number of vertices)';
+} 'Kernel matrix must be bigger than NxN (N is number of vertices)';
 
 sub sort_cluster {
   [ sort {
-    $a->[0] <=> $b->[0] or $a->[1] <=> $b->[1] or $a->[2] <=> $b->[2]
+    $a->{0} <=> $b->{0} or $a->{1} <=> $b->{1} or $a->{2} <=> $b->{2}
   } @{ +shift } ]
 }
 

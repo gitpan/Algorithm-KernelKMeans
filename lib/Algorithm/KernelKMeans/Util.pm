@@ -1,29 +1,66 @@
 package Algorithm::KernelKMeans::Util;
 
+use 5.010;
 use strict;
 use warnings;
 
 use Exporter::Lite;
 use List::Util qw/sum/;
-use List::MoreUtils qw/pairwise/;
+use POSIX qw/tanh/;
 
-our @EXPORT_OK = qw/centroid generate_polynominal_kernel/;
+our @EXPORT_OK = qw/centroid
+                    inner_product
+                    generate_polynominal_kernel
+                    generate_gaussian_kernel
+                    generate_sigmoid_kernel/;
 
 sub centroid {
   my $cluster = shift;
-  my @sum = (0) x @{ $cluster->[0] };
-  for my $vertex (@$cluster) { @sum = pairwise { $a + $b } @sum, @$vertex }
-  [ map { $_ / @$cluster } @sum ];
+  my %centroid;
+  for my $vertex (@$cluster) {
+    while (my ($key, $val) = each %$vertex) {
+      $centroid{$key} //= 0;
+      $centroid{$key} += $val;
+    }
+  }
+  for my $key (keys %centroid) { $centroid{$key} /= @$cluster }
+  return \%centroid;
+}
+
+sub inner_product {
+  my ($x1, $x2) = @_;
+  my @common_keys = grep { exists $x2->{$_} } keys %$x1;
+  return 0 if @common_keys == 0;
+  sum map { $x1->{$_} * $x2->{$_} } @common_keys;
 }
 
 sub generate_polynominal_kernel {
   my ($l, $p) = @_;
-  $l //= 1;
-  $p //= 2;
   sub {
     my ($x1, $x2) = @_;
-    my $inner_product = sum pairwise { $a * $b } @$x1, @$x2;
-    ($l + $inner_product) ** $p
+    ($l + inner_product($x1, $x2)) ** $p
+  }
+}
+
+sub generate_gaussian_kernel {
+  my $sigma = shift;
+  my $numer = 2 * ($sigma ** 2);
+  sub {
+    my ($x1, $x2) = @_;
+    my %tmp; @tmp{keys %$x1, keys %$x2} = ();
+    my $norm = sqrt sum map {
+      my ($e1, $e2) = (($x1->{$_} // 0), ($x2->{$_} // 0));
+      ($e1 - $e2) ** 2;
+    } keys %tmp;
+    exp(-$norm / $numer);
+  }
+}
+
+sub generate_sigmoid_kernel {
+  my ($s, $theta) = @_;
+  sub {
+    my ($x1, $x2) = @_;
+    tanh($s * inner_product($x1, $x2) + $theta);
   }
 }
 
@@ -47,11 +84,23 @@ This module exports nothing by default. You can C<import> functions below:
 
 Takes array ref of vertices and returns centroid vector of the cluster.
 
-=head2 generate_polynominal_kernel([$l = 1], [$p = 2])
+=head2 inner_product($v, $u)
+
+Calculates inner product of C<$v> and C<$u>.
+
+=head2 generate_polynominal_kernel($l, $p)
 
 Generates a polynominal kernel function and returns it.
 
-The generated kernel function will be formed K(x1, x2) = ($l + x1 . x2)^$p ("x1 . x2" means inner product).
+Generated kernel function will be formed C<K(x1, x2) = ($l + x1 . x2)^$p, where "x1 . x2" represents inner product>.
+
+=head2 generate_gaussian_kernel($sigma)
+
+C<K(x1, x2) = exp(-||x1 - x2||^2 / (2 * $sigma)^2)>
+
+=head2 generate_sigmoid_kernel($s, $theta)
+
+C<K(x1, x2) = tanh($s * (x1 . x2) + $theta)>
 
 =head1 AUTHOR
 

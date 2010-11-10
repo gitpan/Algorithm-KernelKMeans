@@ -4,6 +4,7 @@ name 'Algorithm-KernelKMeans';
 all_from 'lib/Algorithm/KernelKMeans.pm';
 
 requires 'namespace::autoclean'           => '0.11';
+requires 'parent'                         => '0.223';
 requires 'Carp'                           => '1.16';
 requires 'Exporter::Lite'                 => '0.02';
 requires 'List::Util'                     => '1.23';
