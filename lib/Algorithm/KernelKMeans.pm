@@ -1,23 +1,26 @@
 package Algorithm::KernelKMeans;
 
-use strict;
-use warnings;
+use 5.010;
+use namespace::autoclean;
+use version;
+use Moose;
 use UNIVERSAL::require;
 
-our $VERSION = '0.03';
+our $VERSION = '0.03_02';
 
-BEGIN {
-  for my $impl (qw/XS PP/) {
-    my $impl_class = __PACKAGE__ . '::' . $impl;
-    if ($impl_class->require) {
-      our $IMPLEMENTATION = $impl;
-      parent->use($impl_class); # be child of $impl_class
-      last;
-    }
+our $IMPLEMENTATION;
+for my $impl (qw/XS PP/) {
+  my $impl_class = __PACKAGE__ . '::' . $impl;
+  if ($impl_class->require) {
+    next if $impl eq 'XS'
+      and version->parse($impl_class->VERSION) < version->parse('0.02_02');
+    $IMPLEMENTATION = $impl_class;
+    extends $IMPLEMENTATION;
+    last;
   }
 }
 
-1;
+__PACKAGE__->meta->make_immutable;
 
 __END__
 
@@ -28,25 +31,23 @@ Algorithm::KernelKMeans - Weighted kernel k-means clusterer
 =head1 SYNOPSIS
 
   use Algorithm::KernelKMeans;
-  use Algorithm::KernelKMeans::Util qw/generate_polynominal_kernel/;
+  use Algorithm::KernelKMeans::Util qw/$KERNEL_POLYNOMINAL/;
   use List::MoreUtils qw/zip/;
   use Try::Tiny;
   
-  my @vertices = map {
+  my @vectors = map {
     my @values = split /\s/;
     my @keys = 0 .. $#values;
     +{ zip @keys, @values };
   } (<>);
-  my $kernel = generate_polynominal_kernel(1, 2); # K(x1, x2) = (1 + x1x2)^2
   my $wkkm = Algorithm::KernelKMeans->new( # default weights are 1
-    vertices => \@vertices,
-    kernel => $kernel
+    vectors => \@vectors,
+    kernel => [$KERNEL_POLYNOMINAL => (1, 2)] # K(x1, x2) = (1 + x1x2)^2
   );
   
-  my @clusters;
   try {
-    @clusters = $wkkm->run(k => 6);
-    for my $cluster (@clusters) {
+    my $clusters = $wkkm->run(k => 6);
+    for my $cluster (@$clusters) {
       ...
     }
   } catch {
@@ -77,38 +78,49 @@ So it's not necessary usually to use the classes directly tough, you can do it i
 
 Constructor. you can specify options below:
 
-=head3 vertices
+=head3 vectors
 
-Required. Array ref of vectors.
-Each vector is represented as an hash ref of positive real numbers.
+Required. Array of vectors.
+Each vector is represented as an hash of positive real numbers.
 
 e.g.:
 
  my $wkkm = Algorithm::KernelKMeans->new(
-   vertices => [ [ 229, 151, 42 ], [ 61, 151, 251 ], [ 11, 120, 55 ] ]
+   vectors => [ +{ prop1 => 229, prop2 => 151, prop3 =>  42 },
+                 +{ prop1 =>  61, prop2 => 151, prop4 => 251 },
+                 +{ prop2 =>  11, prop3 => 120, prop4 =>  55 } ],
+   kernel => [$KERNEL_POLYNOMINAL => (1, 2)]
  );
-]
 
 =head3 weights
 
-Array ref of positive real numbers. Defaults to list of 1s.
+Array of positive real numbers. Defaults to list of 1s.
 
 =head3 kernel
 
-Kernel function. The function takes 2 vectors and returns 1 positive real number.
-Defaults to K(x1, x2) = (1 + x1x2)^2. L<Algorithm::KernelKMeans::Util> has generators for some popular kernel functions.
+Function projects 2 vectors into higher dimentional space and computes inner product.
+
+Kernel function can be specified as a tuple or a code reference.
+
+Tuple is formed with descriptor and parameter(s). For example:
+
+  [$KERNEL_POLYNOMINAL => (1, 2)]
+
+C<$KERNEL_POLYNOMINAL> is a descriptor. And rest of the elements are parameters.
+
+L<Algorithm::KernelKMeans::Util> has some descriptors for some popular kernel functions.
 
 =head3 kernel_matrix
 
-Array ref of array ref of positive real numbers.
+2D array of kernel values.
 
 A matrix whose element at (i, j) is K(xi, xj) where i >= j.
 This is derived automatically from C<kernel> by default, however you can specify it manually if you already have it.
 
 Note that the clusterer only uses lower triangle part of the matrix.
-So it is not necessary for the matrix to have element at (i, j) where i < j (This argument should be called "kernel triangle" rather than "matrix" probably).
+So it is not necessary for the matrix to have element at (i, j) where i < j.
 
-Note that C<kernel> and C<kernel_matrix> is exclusive. When you specify C<kernel_matrix>, C<kernel> function is never used.
+Note that C<kernel> and C<kernel_matrix> are exclusive and either of these is required.
 
 =head2 run(%opts)
 
@@ -121,33 +133,31 @@ Required. (maximum) number of clusters.
 =head3 k_min
 
 Some clusters may be empty during clustering.
-In the case of that, the clusterer just removes the empty clusters and checks number of rest clusters. If it is less than C<k_min>, the clusterer throws an error.
+In the case, the clusterer just removes the empty clusters and checks number of rest clusters. If it is less than C<k_min>, the clusterer throws an error.
 
 Default is same as C<k>.
 
-=head3 shuffle
+=head3 initializer
 
-When this option is true (this is default), the clusterer sets up initial clusters by random shuffling.
+Specifies cluster initializing method.
+By default, the clusterer initializes clusters using KKZ, which is known as a good initializing procedure.
 
-If it is not what you want, you can set false and get always same result:
-
-  use Test::More;
-  my $clusters1 = $kkm->run(k => 6, shuffle => 0);
-  my $clusters2 = $kkm->run(k => 6, shuffle => 0);
-  my $clusters3 = $kkm->run(k => 6);
-  is_deeply($clusters1, $clusters2); # ok
-  is_deeply($clusters1, $clusters3); # not ok (probably)
+You can C<import> some initializer descriptors from C<Algorithm::KernelKMeans::Util>.
 
 =head3 converged
 
 Function predicates that clustering is converged.
 Iteration is broken off and returns result when the predicate returns true.
 
-For each iteration, 2 values are specified:
+For each iteration, 2 values will be specified:
 objective function value of current clusters and new clusters' one.
 As clusters converges, the value decreases.
 
-Default predicate just checks if 2 values are equal.
+Default predicate just checks if these 2 values are equal.
+
+=head2 cluster_indices(%opts)
+
+This method is similar to C<run>, but returns clusters contain indices instead of vectors.
 
 =head1 AUTHOR
 

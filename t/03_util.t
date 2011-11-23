@@ -3,32 +3,23 @@ use warnings;
 
 use ExtUtils::testlib;
 use FindBin;
-use List::MoreUtils qw/all zip/;
+use List::MoreUtils qw/zip/;
 use Test::More;
 
 use Algorithm::KernelKMeans::Util qw/centroid
                                      inner_product
-                                     generate_polynominal_kernel
-                                     generate_gaussian_kernel
-                                     generate_sigmoid_kernel/;
+                                     diff_vector
+                                     euclidean_distance/;
 
-sub kernels {
-  my ($kernel, $vectors) = @_;
-  [ map {
-    my $i = $_;
-    map {
-      my ($v, $u) = ($vectors->[$i], $vectors->[$_]);
-      $kernel->($v, $u);
-    } 0 .. $i;
-  } 0 .. $#$vectors ];
-}
-
-open my $vectors, "$FindBin::Bin/vectors.txt" or die $!;
-my @vertices = map {
+open my $vectors, '<', "$FindBin::Bin/vectors.txt" or die $!;
+my @vectors = map {
   my @vals = split /\s+/;
   my @keys = 0 .. $#vals;
   +{ zip @keys, @vals };
 } <$vectors>;
+
+open my $kmat, '<', "$FindBin::Bin/kernels.txt" or die $!;
+my @kernel_matrix = map { [ split /\s+/ ] } <$kmat>;
 
 {
   my $centroid = centroid([
@@ -49,21 +40,18 @@ my @vertices = map {
                           hoge => 2/3, fuga => 4/3, piyo => 6/3, quux => 4/3 };
 }
 
-my $inner_products = kernels(\&inner_product, \@vertices);
-my $simple_poly_kernel = generate_polynominal_kernel(0, 1);
-my $simple_poly_kernels = kernels($simple_poly_kernel, \@vertices);
-is_deeply $simple_poly_kernels, $inner_products;
+{
+  my $vec1 = +{ x => 3, y => 1 };
+  my $vec2 = +{ x => 2, z => 1 };
+  my $diff = diff_vector $vec1, $vec2;
+  is_deeply $diff, +{ x => 1, y => 1, z => -1 };
+}
 
-my $poly_kernel = generate_polynominal_kernel(1, 2);
-my $poly_kernels = kernels($poly_kernel, \@vertices);
-ok +(all { $_ > 0 } @$poly_kernels), 'Polynominal kernel is positive definite';
-
-my $gaus_kernel = generate_gaussian_kernel(3);
-my $gaus_kernels = kernels($gaus_kernel, \@vertices);
-ok +(all { $_ > 0 } @$gaus_kernels), 'Gaussian kernel is positive definite';
-
-my $sigm_kernel = generate_sigmoid_kernel(1, 0);
-my $sigm_kernels = kernels($sigm_kernel, \@vertices);
-ok +(all { $_ >= 0 } @$sigm_kernels), 'Sigmoid kernel is (almost) semi-positive definite';
+{
+  my $vec1 = +{ x => 2, y => 3 };
+  my $vec2 = +{ x => -2 };
+  my $dist = euclidean_distance $vec1, $vec2;
+  is $dist, 5;
+}
 
 done_testing;

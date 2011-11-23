@@ -1,7 +1,24 @@
 Revision history for Perl extension Algorithm::KernelKMeans
 
+0.03_02  2011-11-22
+    - Added cluster_indices() method
+    - Now it's recommended to use constants for named parameter "kernel" and
+      "initializer" instead of code references
+    - INCOMPATIBLE CHANGES:
+      - Cluster initializing uses KKZ procedure by default
+      - Default kernel is removed
+      - Kernel generators and cluster initializers become not exportable
+      - $Algorithm::KenrelKMeans::IMPLEMENTATION contains full qualified
+        package name instead of last part of it
+      - s/vertice(?=s)|vertex/vector/g
+
+0.03_01  2010-11-23
+    - INCOMPATIBLE CHANGE:
+      run()'s named parameter "shuffle" is replaced by new "initializer"
+    - Documentation fix
+
 0.03  2010-11-10
-    - IMCOMPATIBLE CHANGE: Now all vectors represented as a hashref
+    - INCOMPATIBLE CHANGE: Now all vectors represented as hashref
     - Removed generate_polynominal_kernel()'s default parameters
 
 0.02  2010-11-04

@@ -10,14 +10,22 @@ $ENV{LANG} = 'C';
 all_pod_files_spelling_ok('lib');
 
 __DATA__
-Koichi SATOH
-sekia@cpan.org
 Algorithm::KernelKMeans::XS
-NONINFRINGEMENT
-sublicense
+Koichi SATOH
+apis
+centroid
 clusterer
-APIs
-vertices
+dimentional
+iff
+indices
+initializer
+kkz
+merchantability
+noninfringement
 polynominal
+sekia@cpan.org
+sigmoid
+sublicense
+tuple
 xi
 xj

@@ -4,92 +4,38 @@ use 5.010;
 use namespace::autoclean;
 
 use Carp;
-use List::Util qw/shuffle sum/;
+use List::Util qw/min reduce sum shuffle/;
 use List::MoreUtils qw/natatime pairwise/;
 use Moose;
-use MooseX::Types::Common::Numeric qw/PositiveNum/;
-use MooseX::Types::Moose qw/ArrayRef HashRef CodeRef/;
-use POSIX qw/floor/;
+use POSIX qw/floor tanh/;
 
-use Algorithm::KernelKMeans::Util qw/generate_polynominal_kernel/;
+use Algorithm::KernelKMeans::Util qw/$KERNEL_POLYNOMINAL
+                                     $KERNEL_GAUSSIAN
+                                     $KERNEL_SIGMOID
+                                     $INITIALIZE_SIMPLE
+                                     $INITIALIZE_SHUFFLE
+                                     $INITIALIZE_KKZ
+                                     inner_product
+                                     euclidean_distance/;
 
-our $DEBUG = 0;
-our $VERSION = '0.02';
+with qw/Algorithm::KernelKMeans::Impl/;
 
-has 'vertices' => (
-  is => 'ro',
-  isa => ArrayRef[ HashRef[PositiveNum] ],
-  required => 1,
-  traits => [qw/Array/],
-  handles => +{
-    num_vertices => 'count',
-    vertex => 'get'
-  }
-);
-
-has 'weights' => (
-  is => 'ro',
-  isa => ArrayRef[PositiveNum],
-  lazy => 1,
-  builder => '_build_weights',
-  traits => [qw/Array/],
-  handles => +{
-    num_weights => 'count',
-    weight => 'get'
-  }
-);
-
-has 'kernel' => (
-  is => 'ro',
-  isa => CodeRef,
-  lazy => 1,
-  builder => '_build_kernel'
-);
-
-# vertex index -> vertex index -> kernel
-# Note that the clusterer only uses lower triangle part of the matrix.
-# i.e. It is assumed that K(x1, x2) = K(x2, x1)
-has 'kernel_matrix' => (
-  is => 'ro',
-  isa => ArrayRef[ ArrayRef[PositiveNum] ],
-  lazy => 1,
-  builder => '_build_kernel_matrix'
-);
-
-sub _build_weights { [ (1) x shift->num_vertices ] }
-
-# Polynorminal kernel K(x1, x2) = (1 + x1x2)^2
-sub _build_kernel { generate_polynominal_kernel(1, 2) }
-
-sub _build_kernel_matrix {
-  my $self = shift;
-  my @matrix = map {
-    my $i = $_;
-    [ map {
-      my $j = $_;
-      $self->kernel->($self->vertex($i), $self->vertex($j));
-    } 0 .. $i ];
-  } 0 .. $self->num_vertices - 1;
-  return \@matrix;
+sub init_clusters_simple {
+  my ($k, $vectors) = @_;
+  my $nvectors = @$vectors;
+  _init_clusters($k, [ 0 .. $nvectors - 1 ]);
 }
 
-sub BUILD {
-  my $self = shift;
-  if ($self->num_vertices != $self->num_weights) {
-    croak 'Array "vertices" and "weights" must be same size';
-  }
-  if (@{ $self->kernel_matrix } < $self->num_vertices
-        or @{ $self->kernel_matrix->[-1] } < $self->num_vertices ) {
-    croak 'Kernel matrix seems too small';
-  }
-};
+sub init_clusters_shuffle {
+  my ($k, $vectors) = @_;
+  my $nvectors = @$vectors;
+  _init_clusters($k, [ shuffle 0 .. $nvectors - 1 ]);
+}
 
-sub init_clusters {
-  my ($self, $k, $shuffle) = @_;
-  my $cluster_size = floor($self->num_vertices / $k);
-  my @indices = (0 .. $self->num_vertices - 1);
-  @indices = shuffle @indices if $shuffle;
-  my $iter = natatime $cluster_size, @indices;
+sub _init_clusters {
+  my ($k, $indices) = @_;
+  my $cluster_size = floor($#$indices / $k);
+  my $iter = natatime $cluster_size, @$indices;
   my @clusters;
   while (my @cluster = $iter->()) { push @clusters, \@cluster }
   if (@{ $clusters[-1] } < $cluster_size) {
@@ -99,14 +45,112 @@ sub init_clusters {
   return \@clusters;
 }
 
-sub vertices_of {
-  my ($self, $cluster) = @_;
-  [ map { $self->vertex($_) } @$cluster ];
+sub init_clusters_kkz {
+  my ($k, $vectors) = @_;
+  my $nvectors = @$vectors;
+  my @rep_vectors; # cluster representation vectors
+
+  my $first_vector = reduce {
+    $a->[1] > $b->[1] ? $a : $b
+  } map {
+    my $vector = $vectors->[$_];
+    [ $_ => inner_product($vector, $vector) ];
+  } 0 .. $nvectors - 1;
+  push @rep_vectors, $first_vector->[0];
+
+  until (@rep_vectors == $k) {
+    my @ds = map {
+      my $vector = $vectors->[$_];
+      my $min = min map {
+        euclidean_distance($vector, $vectors->[$_])
+      } @rep_vectors;
+      [ $_ => $min ];
+    } 0 .. $nvectors - 1;
+    my $rep_vector = reduce { $a->[1] > $b->[1] ? $a : $b } @ds;
+    push @rep_vectors, $rep_vector->[0];
+  }
+
+  my @clusters;
+  for my $i (0 .. $nvectors - 1) {
+    my $vector = $vectors->[$i];
+    my @ds = map {
+      my $rep_vector_idx = $rep_vectors[$_];
+      [ $_ => euclidean_distance($vector, $vectors->[$rep_vector_idx]) ];
+    } 0 .. $#rep_vectors;
+    my $nearest = reduce { $a->[1] <= $b->[1] ? $a : $b } @ds;
+    push @{ $clusters[$nearest->[0]] }, $i;
+  }
+  return \@clusters;
 }
 
-sub weights_of {
-  my ($self, $cluster) = @_;
-  [ map { $self->weight($_) } @$cluster ];
+sub generate_polynominal_kernel {
+  my ($l, $p) = @_;
+  sub {
+    my ($x1, $x2) = @_;
+    ($l + inner_product($x1, $x2)) ** $p
+  }
+}
+
+sub generate_gaussian_kernel {
+  my $sigma = shift;
+  my $numer = 2 * ($sigma ** 2);
+  sub {
+    my ($x1, $x2) = @_;
+    my %tmp; @tmp{keys %$x1, keys %$x2} = ();
+    my $norm = sqrt sum map {
+      my ($e1, $e2) = (($x1->{$_} // 0), ($x2->{$_} // 0));
+      ($e1 - $e2) ** 2;
+    } keys %tmp;
+    exp(-$norm / $numer);
+  }
+}
+
+sub generate_sigmoid_kernel {
+  my ($s, $theta) = @_;
+  sub {
+    my ($x1, $x2) = @_;
+    tanh($s * inner_product($x1, $x2) + $theta);
+  }
+}
+
+sub _build_kernel_matrix {
+  my $self = shift;
+
+  my $kernel;
+  if (ref $self->kernel eq 'CODE') {
+    $kernel = $self->kernel;
+  } else {
+    my ($kernel_desc, @params) = @{ $self->kernel };
+    given ($kernel_desc) {
+      when ($KERNEL_POLYNOMINAL) {
+        croak 'Too few parameters' if @params < 2;
+        $kernel = generate_polynominal_kernel(@params);
+      }
+      when ($KERNEL_GAUSSIAN) {
+        croak 'Too few parameters' if @params < 1;
+        $kernel = generate_gaussian_kernel(@params);
+      }
+      when ($KERNEL_SIGMOID) {
+        croak 'Too few parameters' if @params < 2;
+        $kernel = generate_sigmoid_kernel(@params);
+      }
+      default { croak 'Unknown kernel function' }
+    }
+  }
+
+  my @matrix = map {
+    my $i = $_;
+    [ map {
+      my $j = $_;
+      $kernel->($self->vector($i), $self->vector($j));
+    } 0 .. $i ];
+  } 0 .. $self->num_vectors - 1;
+  return \@matrix;
+}
+
+sub init_clusters {
+  my ($self, $init, $k) = @_;
+  $init->($k, $self->vectors, $self->weights, $self->kernel_matrix);
 }
 
 sub total_weight_of {
@@ -117,7 +161,7 @@ sub total_weight_of {
 sub step {
   my ($self, $clusters, $norms) = @_;
   my @new_clusters = map { [] } 0 .. $#$clusters;
-  for my $i (0 .. $self->num_vertices - 1) {
+  for my $i (0 .. $self->num_vectors - 1) {
     my ($nearest) = sort { $a->[1] <=> $b->[1] } map {
       [ $_ => $norms->[$i][$_] ]
     } 0 .. $#$clusters;
@@ -164,7 +208,7 @@ sub compute_norms {
 
       $term1 + $term2 + $term3;
     } 0 .. $#$clusters ]
-  } 0 .. $self->num_vertices - 1;
+  } 0 .. $self->num_vectors - 1;
   return \@norms;
 }
 
@@ -173,30 +217,40 @@ sub _norm_term3_denom_of {
   sum map {
     my $i = $_;
     map {
-      my $j = $_;
       my ($s, $t) = $i >= $_ ? ($i, $_) : ($_, $i);
       $self->weight($s) * $self->weight($t) * $self->kernel_matrix->[$s][$t];
     } @$cluster;
   } @$cluster;
 }
 
-sub run {
+sub cluster_indices {
   my ($self, %opts) = @_;
-  my $k = delete $opts{k} // croak 'Required argument "k" missing';
+  my $k = delete $opts{k} // croak 'Missing required parameter "k"';
   my $k_min = delete $opts{k_min} // $k;
   croak '"k_min" must be less than or equal to "k"' if $k_min > $k;
   my $converged = delete $opts{converged} // sub {
     my ($score, $new_score) = @_;
     $score == $new_score;
   };
-  my $shuffle = delete $opts{shuffle} // 1;
-  if (keys %opts) {
-    croak 'Unknown argument(s): ', join ', ', map { qq/"$_"/ } sort keys %opts;
+
+  my $init = delete $opts{initializer} // $INITIALIZE_KKZ;
+  unless (ref $init) {
+    given ($init) {
+      when ($INITIALIZE_SIMPLE) { $init = \&init_clusters_simple }
+      when ($INITIALIZE_SHUFFLE) { $init = \&init_clusters_shuffle }
+      when ($INITIALIZE_KKZ) { $init = \&init_clusters_kkz }
+      default { croak 'Unknown initializer' }
+    }
   }
 
-  # cluster index -> [vertex index]
-  my $clusters = $self->init_clusters($k, $shuffle);
-  # vertex index -> cluster index -> norm
+  if (keys %opts) {
+    my $missings = join ', ', map { qq/"$_"/ } sort keys %opts;
+    croak "Unknown argument(s): $missings";
+  }
+
+  # cluster index -> [vector index]
+  my $clusters = $self->init_clusters($init, $k);
+  # vector index -> cluster index -> norm
   my $norms = $self->compute_norms($clusters);
   my $score;
   my $new_score = $self->compute_score($clusters, $norms);
@@ -209,7 +263,7 @@ sub run {
     $new_score = $self->compute_score($clusters, $norms);
   } until $converged->($score, $new_score);
 
-  [ map { $self->vertices_of($_) } @$clusters ];
+  return $clusters;
 }
 
 __PACKAGE__->meta->make_immutable;

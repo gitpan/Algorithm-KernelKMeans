@@ -1,75 +1,220 @@
 use strict;
 use warnings;
 
+use Data::Dumper;
 use ExtUtils::testlib;
 use FindBin;
-use List::MoreUtils qw/zip/;
+use List::MoreUtils qw/all zip/;
 use Test::More;
 use Test::Exception;
 
 use lib $FindBin::Bin; # for Algorithm::NaiveKmeans
 
 use Algorithm::KernelKMeans::PP;
-use Algorithm::KernelKMeans::Util qw/generate_polynominal_kernel/;
+use Algorithm::KernelKMeans::Util qw/$KERNEL_POLYNOMINAL
+                                     $KERNEL_GAUSSIAN
+                                     $KERNEL_SIGMOID
+                                     $INITIALIZE_SIMPLE
+                                     inner_product/;
 use Algorithm::NaiveKMeans;
 
 diag 'This test may take some minutes';
 
+# 3D vectors
 open my $vectors , '<', "$FindBin::Bin/vectors.txt" or die $!;
-my @vertices = map {
+my @vectors = map {
   my @vals = split /\s+/;
   my @keys = 0 .. $#vals;
   +{ zip @keys, @vals };
 } <$vectors>;
+
+my @weights = (1.0) x @vectors;
+
+# Precomputed kernel matrix for @vectors
 open my $kmat, '<', "$FindBin::Bin/kernels.txt" or die $!;
 my @kernel_matrix = map { [ split /\s+/ ] } <$kmat>;
 
-dies_ok {
-  Algorithm::KernelKMeans::PP->new;
-} '"vertices" is required';
+subtest '"vectors" and "kernel" (or "kernel_matrix") is required' => sub {
+  dies_ok { Algorithm::KernelKMeans::PP->new };
+  dies_ok { Algorithm::KernelKMeans::PP->new(vectors => []) };
+  dies_ok { Algorithm::KernelKMeans::PP->new(vectors => \@vectors) };
+  lives_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_POLYNOMINAL => (1, 2)]
+    );
+  };
+  lives_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel_matrix => \@kernel_matrix
+    );
+  };
+  dies_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_POLYNOMINAL => (1, 2)],
+      kernel_matrix => \@kernel_matrix
+    );
+  } '"kernel" and "kernel_matrix" are exclusive';
+  done_testing;
+};
 
-lives_ok {
-  Algorithm::KernelKMeans::PP->new(vertices => \@vertices);
-} 'Default kernel is available';
+subtest '"vectors" and "weights" must be same size' => sub {
+  dies_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      weights => [1, 1, 1],
+      kernel => [$KERNEL_POLYNOMINAL => (1, 2)]
+    );
+  };
+  lives_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      weights => [0 .. $#vectors],
+      kernel => [$KERNEL_POLYNOMINAL => (1, 2)]
+    );
+  };
 
-lives_ok {
-  Algorithm::KernelKMeans::PP->new(
-    vertices => \@vertices,
-    weights => [0 .. $#vertices]
-  );
-} '"vertices" and "weights" must be same size';
+  done_testing;
+};
 
-dies_ok {
-  Algorithm::KernelKMeans::XS->new(vertices => []);
-} '"vertices" must not be empty';
+{
+  my $km1 = Algorithm::KernelKMeans::PP->new(
+    vectors => \@vectors,
+    kernel => [$KERNEL_POLYNOMINAL => (1, 2)] # recommended style
+  )->kernel_matrix;
+  my $km2 = Algorithm::KernelKMeans::PP->new(
+    vectors => \@vectors,
+    kernel => Algorithm::KernelKMeans::PP::generate_polynominal_kernel(1, 2)
+  )->kernel_matrix;
+  is_deeply $km1, $km2, 'Kernel function can be specified as coderef or tuple';
+}
 
-dies_ok {
-  Algorithm::KernelKMeans::PP->new(
-    vertices => \@vertices,
-    weights => [1, 1, 1]
-  );
-} '"vertices" and "weights" must be same size';
+subtest 'Polynominal kernel needs 2 parameters' => sub {
+  lives_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_POLYNOMINAL => (1, 2)]
+    )->kernel_matrix;
+  };
+  dies_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_POLYNOMINAL => (1)]
+    )->kernel_matrix;
+  };
+  done_testing;
+};
 
-lives_ok {
-  Algorithm::KernelKMeans::PP->new(
-    vertices => \@vertices,
-    kernel => generate_polynominal_kernel(1, 2)
-  );
-} 'Kernel function can be set';
+subtest 'Gaussian kernel needs 1 parameter' => sub {
+  lives_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_GAUSSIAN => (1)]
+    )->kernel_matrix;
+  };
+  dies_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_GAUSSIAN => ()]
+    )->kernel_matrix;
+  };
+  done_testing;
+};
 
-lives_ok {
-  Algorithm::KernelKMeans::PP->new(
-    vertices => \@vertices,
-    kernel_matrix => \@kernel_matrix
-  );
-} 'Kernel matrix can be speficied manually';
+subtest 'Sigmoid kernel needs 2 parameters' => sub {
+  lives_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_SIGMOID => (1, 2)]
+    )->kernel_matrix;
+  };
+  dies_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel => [$KERNEL_SIGMOID => (1)]
+    )->kernel_matrix;
+  };
+  done_testing;
+};
 
-dies_ok {
-  Algorithm::KernelKMeans::PP->new(
-    vertices => \@vertices,
-    kernel_matrix => [ @kernel_matrix[0 .. 31] ]
-  );
-} 'Kernel matrix must be bigger than NxN (N is number of vertices)';
+subtest 'Checks kernel matrix size' => sub {
+  dies_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel_matrix => [ @kernel_matrix[0 .. 31] ]
+    );
+  };
+  dies_ok {
+    Algorithm::KernelKMeans::PP->new(
+      vectors => \@vectors,
+      kernel_matrix => [ ([1, 3, 5]) x @vectors ]
+    );
+  };
+  done_testing;
+};
+
+sub kernels {
+  my ($kernel, $vectors) = @_;
+  [ map {
+    my $i = $_;
+    map {
+      my ($v, $u) = ($vectors->[$i], $vectors->[$_]);
+      $kernel->($v, $u);
+    } 0 .. $i;
+  } 0 .. $#$vectors ];
+}
+
+{
+  no strict qw/refs/;
+  for my $sym (qw/generate_polynominal_kernel
+                  generate_sigmoid_kernel
+                  generate_gaussian_kernel
+                  init_clusters_simple
+                  init_clusters_shuffle
+                  init_clusters_kkz/) {
+    *$sym = \&{ "Algorithm::KernelKMeans::PP::$sym" };
+  }
+}
+
+subtest 'Kernels' => sub {
+  my $inner_products = kernels(\&inner_product, \@vectors);
+  my $simple_poly_kernel = generate_polynominal_kernel(0, 1);
+  my $simple_poly_kernels = kernels($simple_poly_kernel, \@vectors);
+  is_deeply $simple_poly_kernels, $inner_products;
+
+  my $poly_kernel = generate_polynominal_kernel(1, 2);
+  my $poly_kernels = kernels($poly_kernel, \@vectors);
+  ok +(all { $_ > 0 } @$poly_kernels), 'Polynominal kernel is positive definite';
+
+  my $gaus_kernel = generate_gaussian_kernel(3);
+  my $gaus_kernels = kernels($gaus_kernel, \@vectors);
+  ok +(all { $_ > 0 } @$gaus_kernels), 'Gaussian kernel is positive definite';
+
+  my $sigm_kernel = generate_sigmoid_kernel(1, 0);
+  my $sigm_kernels = kernels($sigm_kernel, \@vectors);
+  ok +(all { $_ >= 0 } @$sigm_kernels), 'Sigmoid kernel is (almost) semi-positive definite';
+
+  done_testing;
+};
+
+subtest 'Cluster initializers' => sub {
+  my $clus1 = init_clusters_simple(6, \@vectors, \@weights, \@kernel_matrix);
+  my $clus2 = init_clusters_simple(6, \@vectors, \@weights, \@kernel_matrix);
+  ok +(all { @$_ > 0 } @$clus1);
+  is_deeply $clus1, $clus2;
+
+  my $clus3 = init_clusters_shuffle(6, \@vectors, \@weights, \@kernel_matrix);
+  my $clus4 = init_clusters_shuffle(6, \@vectors, \@weights, \@kernel_matrix);
+  ok +(all { @$_ > 0 } @$clus3);
+  isnt Dumper($clus3), Dumper($clus4);
+
+  my $clus5 = init_clusters_kkz(6, \@vectors, \@weights, \@kernel_matrix);
+  ok +(all { @$_ > 0 } @$clus5);
+
+  done_testing;
+};
 
 sub sort_cluster {
   [ sort {
@@ -79,13 +224,13 @@ sub sort_cluster {
 
 {
   my $kkm = Algorithm::KernelKMeans::PP->new(
-    vertices => \@vertices,
-    kernel => generate_polynominal_kernel(0, 1) # just inner product
+    vectors => \@vectors,
+    kernel => [$KERNEL_POLYNOMINAL => (0, 1)] # just inner product
   );
-  my $kkm_clusters = $kkm->run(k => 6, shuffle => 0);
+  my $kkm_clusters = $kkm->run(k => 6, initializer => $INITIALIZE_SIMPLE);
   my @kkm_clusters = map { sort_cluster $_ } @$kkm_clusters;
 
-  my $nkm = Algorithm::NaiveKMeans->new(vertices => \@vertices);
+  my $nkm = Algorithm::NaiveKMeans->new(vectors => \@vectors);
   my $nkm_clusters = $nkm->run(k => 6, shuffle => 0);
   my @nkm_clusters = map { sort_cluster $_ } @$nkm_clusters;
 
@@ -95,8 +240,8 @@ sub sort_cluster {
 
 {
   my $kkm = Algorithm::KernelKMeans::PP->new(
-    vertices => \@vertices,
-    kernel => generate_polynominal_kernel(1, 2)
+    vectors => \@vectors,
+    kernel => [$KERNEL_POLYNOMINAL => (1, 2)]
   );
 
   dies_ok {
@@ -111,8 +256,8 @@ sub sort_cluster {
     $kkm->run(k => 6, foo => 'bar');
   } 'Unkown parameter should be error';
 
-  my @clusters1 = map { sort_cluster $_ } @{ $kkm->run(k => 6, shuffle => 0) };
-  my @clusters2 = map { sort_cluster $_ } @{ $kkm->run(k => 6, shuffle => 0) };
+  my @clusters1 = map { sort_cluster $_ } @{ $kkm->run(k => 6) };
+  my @clusters2 = map { sort_cluster $_ } @{ $kkm->run(k => 6) };
   is_deeply \@clusters1, \@clusters2,
     'WKKM with same initial cluster is deterministic';
 }

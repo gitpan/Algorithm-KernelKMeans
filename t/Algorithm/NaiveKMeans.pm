@@ -16,14 +16,14 @@ use POSIX qw/floor/;
 use ExtUtils::testlib;
 use Algorithm::KernelKMeans::Util qw/centroid/;
 
-has 'vertices' => (
+has 'vectors' => (
   is => 'ro',
   isa => ArrayRef[ HashRef[PositiveNum] ],
   required => 1,
   traits => [qw/Array/],
   handles => +{
-    num_vertices => 'count',
-    vertex => 'get'
+    num_vectors => 'count',
+    vector => 'get'
   }
 );
 
@@ -47,16 +47,16 @@ sub score {
   my $score = 0;
   for my $cluster (@$clusters) {
     my $centroid = centroid $cluster;
-    for my $vertex (@$cluster) { $score += norm sub_vector($vertex, $centroid) }
+    for my $vector (@$cluster) { $score += norm sub_vector($vector, $centroid) }
   }
   return $score;
 }
 
 sub init_clusters {
   my ($self, $k, $shuffle) = @_;
-  my @vertices = $shuffle ? shuffle @{ $self->vertices } : @{ $self->vertices };
-  my $n = floor(@vertices / $k);
-  my $iter = natatime $n, @vertices;
+  my @vectors = $shuffle ? shuffle @{ $self->vectors } : @{ $self->vectors };
+  my $n = floor(@vectors / $k);
+  my $iter = natatime $n, @vectors;
   my @clusters;
   while (my @cluster = $iter->()) { push @clusters, \@cluster; }
   if (@{ $clusters[-1] } < $n) {
@@ -70,12 +70,12 @@ sub step {
   my ($self, $clusters) = @_;
   my @centroids = map { centroid $_ } @$clusters;
   my @new_clusters = map { [] } (1 .. @$clusters);
-  for my $vertex (map { (@$_) } @$clusters) {
+  for my $vector (map { (@$_) } @$clusters) {
     my $i = 0;
     my ($nearest) = sort { $a->[1] <=> $b->[1] } map {
-      [ $i++ => norm(sub_vector($vertex, $_)) ]
+      [ $i++ => norm(sub_vector($vector, $_)) ]
     } @centroids;
-    push @{ $new_clusters[$nearest->[0]] }, $vertex;
+    push @{ $new_clusters[$nearest->[0]] }, $vector;
   }
   [ grep { @$_ != 0 } @new_clusters ];
 }

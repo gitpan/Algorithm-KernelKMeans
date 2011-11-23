@@ -1,0 +1,67 @@
+{
+   "abstract" : "Weighted kernel k-means clusterer",
+   "author" : [
+      "Koichi SATOH <sekia@cpan.org>"
+   ],
+   "dynamic_config" : 0,
+   "generated_by" : "Module::Install version 1.04, CPAN::Meta::Converter version 2.112621",
+   "license" : [
+      "mit"
+   ],
+   "meta-spec" : {
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
+      "version" : "2"
+   },
+   "name" : "Algorithm-KernelKMeans",
+   "no_index" : {
+      "directory" : [
+         "inc",
+         "t",
+         "xt"
+      ]
+   },
+   "prereqs" : {
+      "build" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "6.62",
+            "ExtUtils::testlib" : "6.56",
+            "Test::Exception" : "0.29",
+            "Test::More" : "0.88"
+         }
+      },
+      "configure" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "6.62"
+         }
+      },
+      "runtime" : {
+         "requires" : {
+            "Attribute::Constant" : "0.02",
+            "Carp" : "1.16",
+            "Exporter::Lite" : "0.02",
+            "List::MoreUtils" : "0.22",
+            "List::Util" : "1.23",
+            "Moose" : "1.1",
+            "MooseX::Types::Common::Numeric" : "0.001003",
+            "MooseX::Types::Moose" : "0.23",
+            "MooseX::Types::Structured" : "0.28",
+            "POSIX" : "1.19",
+            "UNIVERSAL::require" : "0.13",
+            "namespace::autoclean" : "0.11",
+            "parent" : "0.223",
+            "perl" : "5.010",
+            "version" : "0.82"
+         }
+      }
+   },
+   "release_status" : "testing",
+   "resources" : {
+      "license" : [
+         "http://opensource.org/licenses/mit-license.php"
+      ],
+      "repository" : {
+         "url" : "http://bitbucket.org/sekia/algorithm-kernelkmeans"
+      }
+   },
+   "version" : "0.03_02"
+}
